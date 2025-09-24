@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chess vs Bot</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+
+    <style>
+      body {
+        background: linear-gradient(135deg, #2c3e50, #4ca1af);
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: #eee;
+        user-select: none;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        background: #1c1c1c;
+        padding: 30px;
+        border-radius: 1rem;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        grid-template-rows: repeat(8, 1fr);
+        width: min(90vw, 90vh);
+        aspect-ratio: 1 / 1;
+        border-radius: 1rem;
+        overflow: hidden;
+        border: 3px solid #382f2b;
+        box-shadow: 0 0 20px 4px rgba(0, 0, 0, 0.8);
+        background: #382f2b;
+      }
+
+      .square {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        cursor: pointer;
+      }
+      .white {
+        background-color: #f0e6d2;
+      }
+      .black {
+        background-color: #5a3e1b;
+      }
+      .square.highlight::before,
+      .square.capture::before {
+        pointer-events: none;
+        border-radius: 50%;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .square.highlight::before {
+        content: "";
+        width: 22px;
+        height: 22px;
+        background-color: rgba(0, 128, 0, 0.7);
+      }
+      .square.capture::before {
+        content: "";
+        width: 40px;
+        height: 40px;
+        background-color: rgba(255, 0, 0, 0.3);
+      }
+      img.piece {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        cursor: grab;
+        user-select: none;
+      }
+      img.piece:active {
+        cursor: grabbing;
+        transform: scale(1.1);
+      }
+      #promotion-popup,
+      #checkmate-popup {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1000;
+        display: none;
+        padding: 20px;
+        border-radius: 1rem;
+        background: #f0e6d2;
+        color: #333;
+        font-size: 1.2rem;
+      }
+      #checkmate-popup {
+        background: #b71c1c;
+        color: #fff;
+        font-weight: bold;
+        z-index: 2000;
+      }
+      #checkmate-popup button {
+        margin-top: 20px;
+      }
+
+      #moves li {
+        padding: 6px 10px;
+        border-bottom: 1px solid #ccc;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 1rem;
+      }
+
+      #moves li:nth-child(even) {
+        background-color: #f9f9f9;
+      }
+
+      #moves li:nth-child(odd) {
+        background-color: #e6e6e6;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      class="container d-flex justify-content-center align-items-center vh-100"
+    >
+      <h1 class="text-center mb-4" id="username-display">
+        Welcome, <span id="userNameText">Guest</span>!
+      </h1>
+
+      <div class="row w-100">
+        <div class="col-md-8 d-flex justify-content-center">
+          <div class="board"></div>
+        </div>
+        <div class="col-md-4">
+          <div
+            id="move-list"
+            class="bg-light text-dark p-3 rounded"
+            style="max-height: 512px; overflow-y: auto"
+          >
+            <ol
+              id="moves"
+              class="ps-3 mb-0"
+              style="list-style-position: inside"
+            ></ol>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="promotion-popup">
+      <div>Promote to:</div>
+      <button data-piece="q">&#9813;</button>
+      <button data-piece="r">&#9814;</button>
+      <button data-piece="b">&#9815;</button>
+      <button data-piece="n">&#9816;</button>
+    </div>
+
+    <div id="checkmate-popup">
+      <div id="checkmate-message"></div>
+      <button id="restart-btn" class="btn btn-light">Restart Game</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.12.0/chess.min.js"></script>
+    <script>
+      const boardEl = document.querySelector(".board");
+      const promotionPopup = document.getElementById("promotion-popup");
+      const checkmatePopup = document.getElementById("checkmate-popup");
+      const checkmateMessage = document.getElementById("checkmate-message");
+      const restartBtn = document.getElementById("restart-btn");
+      const chess = new Chess();
+
+      const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      const ranks = [8, 7, 6, 5, 4, 3, 2, 1];
+
+      let draggedPiece = null,
+        fromSquare = null,
+        toSquare = null,
+        selectedSquare = null;
+
+      const botName = "Bot 1500"; // Change this per bot page
+
+      function drawBoard() {
+        boardEl.innerHTML = "";
+        for (let r of ranks) {
+          for (let f of files) {
+            const squareId = f + r;
+            const square = document.createElement("div");
+            square.classList.add("square");
+            square.classList.add(
+              (files.indexOf(f) + ranks.indexOf(r)) % 2 === 0
+                ? "white"
+                : "black"
+            );
+            square.dataset.square = squareId;
+
+            const piece = chess.get(squareId);
+            if (piece) {
+              const img = document.createElement("img");
+              img.src = `https://chessboardjs.com/img/chesspieces/wikipedia/${
+                piece.color
+              }${piece.type.toUpperCase()}.png`;
+              img.classList.add("piece");
+              img.dataset.square = squareId;
+              img.draggable = piece.color === "w" && chess.turn() === "w";
+              square.appendChild(img);
+              if (img.draggable) {
+                img.addEventListener("dragstart", onDragStart);
+              }
+            }
+
+            square.addEventListener("dragover", (e) => e.preventDefault());
+            square.addEventListener("drop", onDrop);
+            square.addEventListener("click", onClickSquare);
+            boardEl.appendChild(square);
+          }
+        }
+      }
+
+      function clearHighlights() {
+        document
+          .querySelectorAll(".square.highlight, .square.capture")
+          .forEach((sq) => sq.classList.remove("highlight", "capture"));
+      }
+
+      function highlightLegalMoves(square) {
+        clearHighlights();
+        const legalMoves = chess.moves({ square, verbose: true });
+        legalMoves.forEach((move) => {
+          const targetSq = document.querySelector(`[data-square="${move.to}"]`);
+          if (targetSq) {
+            if (move.captured) {
+              targetSq.classList.add("capture");
+            } else {
+              targetSq.classList.add("highlight");
+            }
+          }
+        });
+      }
+
+      function onClickSquare(e) {
+        const clickedSquare = e.currentTarget.dataset.square;
+        const piece = chess.get(clickedSquare);
+
+        if (
+          !selectedSquare &&
+          piece &&
+          piece.color === "w" &&
+          chess.turn() === "w"
+        ) {
+          selectedSquare = clickedSquare;
+          highlightLegalMoves(selectedSquare);
+          return;
+        }
+
+        if (selectedSquare && selectedSquare !== clickedSquare) {
+          const from = selectedSquare;
+          const to = clickedSquare;
+          const movingPiece = chess.get(from);
+          const promotionRank = movingPiece.color === "w" ? "8" : "1";
+
+          const isPawnPromotion =
+            movingPiece.type === "p" && to[1] === promotionRank;
+
+          if (isPawnPromotion) {
+            const testMove = chess.move({ from, to, promotion: "q" });
+            if (!testMove) return;
+            chess.undo();
+
+            fromSquare = from;
+            toSquare = to;
+            promotionPopup.style.display = "block";
+            return;
+          }
+
+          const move = chess.move({ from, to, promotion: "q" });
+          if (move) {
+            drawBoard();
+            updateMoveList(); // ✅ Update move list here
+            checkGameOver();
+            if (chess.turn() === "b") requestBotMove();
+          }
+        }
+
+        selectedSquare = null;
+        clearHighlights();
+      }
+
+      function onDragStart(e) {
+        draggedPiece = e.target;
+        fromSquare = e.target.dataset.square;
+        const piece = chess.get(fromSquare);
+        if (piece.color !== "w" || chess.turn() !== "w")
+          return e.preventDefault();
+
+        selectedSquare = null;
+        clearHighlights();
+        highlightLegalMoves(fromSquare);
+      }
+
+      function onDrop(e) {
+        e.preventDefault();
+        toSquare = e.currentTarget.dataset.square;
+
+        const piece = chess.get(fromSquare);
+        if (!piece || piece.color !== "w" || chess.turn() !== "w") return;
+
+        const promotionRank = piece.color === "w" ? "8" : "1";
+        const isPawnPromotion =
+          piece.type === "p" && toSquare[1] === promotionRank;
+
+        if (isPawnPromotion) {
+          const testMove = chess.move({
+            from: fromSquare,
+            to: toSquare,
+            promotion: "q",
+          });
+          if (!testMove) return;
+          chess.undo();
+
+          promotionPopup.style.display = "block";
+          return;
+        }
+
+        const move = chess.move({
+          from: fromSquare,
+          to: toSquare,
+          promotion: "q",
+        });
+        if (move) {
+          drawBoard();
+          updateMoveList(); // ✅ Update move list here
+          checkGameOver();
+          if (chess.turn() === "b") requestBotMove();
+        }
+
+        draggedPiece = null;
+        fromSquare = null;
+        toSquare = null;
+        clearHighlights();
+      }
+
+      promotionPopup.querySelectorAll("button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const promotionPiece = button.dataset.piece;
+          const move = chess.move({
+            from: fromSquare,
+            to: toSquare,
+            promotion: promotionPiece,
+          });
+          if (move) {
+            drawBoard();
+            updateMoveList(); // ✅ Update move list here
+            checkGameOver();
+            if (chess.turn() === "b") requestBotMove();
+          }
+
+          promotionPopup.style.display = "none";
+          draggedPiece = null;
+          fromSquare = null;
+          toSquare = null;
+          selectedSquare = null;
+          clearHighlights();
+        });
+      });
+
+      function checkGameOver() {
+        const user = JSON.parse(localStorage.getItem("user"));
+        const username =
+          user?.name || localStorage.getItem("username") || "Guest";
+
+        const statsKey = `stats_${username}`;
+        const stats = JSON.parse(localStorage.getItem(statsKey)) || {};
+
+        if (!stats[botName]) {
+          stats[botName] = { played: 0, wins: 0, losses: 0, draws: 0 };
+        }
+
+        const result = chess.in_checkmate()
+          ? chess.turn() === "w"
+            ? "loss"
+            : "win"
+          : chess.in_draw() || chess.in_stalemate()
+          ? "draw"
+          : null;
+
+        if (result) {
+          stats[botName].played++;
+          if (result === "win") stats[botName].wins++;
+          else if (result === "loss") stats[botName].losses++;
+          else stats[botName].draws++;
+
+          localStorage.setItem(statsKey, JSON.stringify(stats));
+
+          if (result === "win" || result === "loss") {
+            const winner = result === "win" ? "White" : "Black";
+            checkmateMessage.textContent = `Checkmate! ${winner} wins!`;
+          } else {
+            checkmateMessage.textContent = `Draw!`;
+          }
+
+          checkmatePopup.style.display = "block";
+        }
+      }
+
+      restartBtn.addEventListener("click", () => {
+        chess.reset();
+        drawBoard();
+        updateMoveList(); // ✅ Clear move list on restart
+        checkmatePopup.style.display = "none";
+        selectedSquare = null;
+        clearHighlights();
+      });
+
+      document.addEventListener("dragend", clearHighlights);
+
+      async function requestBotMove() {
+        try {
+          const response = await fetch("http://localhost:4000/bot-move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fen: chess.fen(), difficulty: "easy" }),
+          });
+
+          const data = await response.json();
+          if (data && data.move) {
+            const botMove = chess.move(data.move);
+            if (botMove) {
+              drawBoard();
+              updateMoveList(); // ✅ Update move list for bot
+              checkGameOver();
+            }
+          }
+        } catch (err) {
+          console.error("Bot move error:", err);
+        }
+      }
+
+      function updateMoveList() {
+        const history = chess.history();
+        const moveListEl = document.getElementById("moves");
+        moveListEl.innerHTML = "";
+
+        for (let i = 0; i < history.length; i += 2) {
+          const movePair = document.createElement("li");
+          const whiteMove = history[i];
+          const blackMove = history[i + 1] || "";
+          movePair.textContent = `${whiteMove} ${blackMove}`;
+          moveListEl.appendChild(movePair);
+        }
+      }
+
+      drawBoard();
+      updateMoveList();
+    </script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const username = localStorage.getItem("username") || "Guest";
+        document.getElementById("userNameText").textContent = username;
+      });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
